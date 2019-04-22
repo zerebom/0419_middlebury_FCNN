@@ -6,34 +6,40 @@ directory_path = r'C:/Users/k-higuchi\Desktop\LAB2019\2019_04_10\Middle_Data\qua
 
 
 class Loader(object):
-    def __init__(self, directory_path, init_size=(128, 128), one_hot=True):
+    def __init__(self, directory_path, init_size=(128, 128), one_hot=False):
+        #返り値はDataSetClassに、list型のndarray型画像を渡しているもの
         self._data = Loader.import_data(directory_path, init_size, one_hot)
+    
+    def get_all_dataset(self):
+        return self._data
+    
+    def load_train_test(self, train_rate=0.85, shuffle=True, transpose_by_color=False):
+        """
+        `Load datasets splited into training set and test set.
+        訓練とテストに分けられたデータセットをロードします．
+        Args:
+            train_rate (float): Training rate.
+            shuffle (bool): If true, shuffle dataset.
+            transpose_by_color (bool): If True, transpose images for chainer. [channel][width][height]
+        Returns:
+            Training Set (Dataset), Test Set (Dataset)
+        """
+        if train_rate < 0.0 or train_rate > 1.0:
+            raise ValueError("train_rate must be from 0.0 to 1.0.")
+        if transpose_by_color:
+            self._data.transpose_by_color()
+        if shuffle:
+            self._data.shuffle()
 
-        def load_train_test(self, train_rate=0.85, shuffle=True, transpose_by_color=False):
-            """
-            `Load datasets splited into training set and test set.
-            訓練とテストに分けられたデータセットをロードします．
-            Args:
-                train_rate (float): Training rate.
-                shuffle (bool): If true, shuffle dataset.
-                transpose_by_color (bool): If True, transpose images for chainer. [channel][width][height]
-            Returns:
-                Training Set (Dataset), Test Set (Dataset)
-            """
-            if train_rate < 0.0 or train_rate > 1.0:
-                raise ValueError("train_rate must be from 0.0 to 1.0.")
-            if transpose_by_color:
-                self._data.transpose_by_color()
-            if shuffle:
-                self._data.shuffle()
+        train_size = int(self._data.images_left.shape[0] * train_rate)
+        data_size = int(len(self._data.images_left))
+        #全て読み取った内、train_sizeだけスライスして取ってくる。
+        train_set = self._data.perm(0, train_size)
+        test_set = self._data.perm(train_size, data_size)
 
-            train_size = int(self._data.images_left.shape[0] * train_rate)
-            data_size = int(len(self._data.images_left))
-            train_set = self._data.perm(0, train_size)
-            test_set = self._data.perm(train_size, data_size)
+        return train_set, test_set
 
-            return train_set, test_set
-
+    #extract_imageを使って、listかつndarray状態で、格納、Dataset型で返す。
     @staticmethod
     def import_data(directory_path, init_size=None, one_hot=True):
         # Generate paths of images to load
@@ -42,16 +48,16 @@ class Loader(object):
 
         # Extract images to ndarray using paths
         # 画像データをndarrayに展開
-        images_left, images_right = Loader.extract_images(
-            paths_right, paths_left, init_size, one_hot)
+        images_left, images_right = Loader.extract_images(paths_right, paths_left, init_size, one_hot)
 
         # Get a color palette
         # カラーパレットを取得
-        image_sample_palette = Image.open(paths_left[0])
-        palette = image_sample_palette.getpalette()
+        # image_sample_palette = Image.open(paths_left[0])
+        # palette = image_sample_palette.getpalette()
 
-        return DataSet(images_left, images_right, palette)
-
+        return DataSet(images_left, images_right)
+    
+    #画像のpathを集める
     @staticmethod
     def generate_paths(directory_path):
         left_path = r'\*\im0.png'
@@ -64,7 +70,8 @@ class Loader(object):
             raise FileNotFoundError("Could not load images.")
 
         return paths_right, paths_left
-
+    
+    #image_generatorを使って、画像をarray型に変換されている状態でリストに格納している。
     @staticmethod
     def extract_images(paths_left, paths_right, init_size, one_hot):
         images_left, images_right = [], []
@@ -76,7 +83,8 @@ class Loader(object):
             if len(images_left) % 20 == 0:
                 print(".", end="", flush=True)
         print(" Completed", flush=True)
-
+        
+         # Cast to ndarray
         print("Loading right images", end="", flush=True)
         for image in Loader.image_generator(paths_right, init_size, normalization=False):
             images_right.append(image)
@@ -85,6 +93,25 @@ class Loader(object):
         print(" Completed")
 
         assert len(images_left) == len(images_right)
+        
+        # Cast to ndarray
+        images_left = np.asarray(images_left, dtype=np.float32)
+        images_right = np.asarray(images_right, dtype=np.uint8)
+
+        # Change indices which correspond to "void" from 255
+        # images_right = np.where(images_right == 255, len(DataSet.CATEGORY)-1, images_right)
+
+        # One hot encoding using identity matrix.
+        if one_hot:
+            print("Casting to one-hot encoding... ", end="", flush=True)
+            identity = np.identity(3, dtype=np.uint8)
+            print(images_right.shape)
+            images_right = identity[images_right]
+            print("Done")
+        else:
+            pass
+
+        return images_left, images_right
 
     @staticmethod
     def crop_to_square(image):
@@ -110,7 +137,7 @@ class Loader(object):
 
 
 class DataSet(object):
-    def __init__(self, images_left, images_right, image_palette, augmenter=None):
+    def __init__(self, images_left, images_right, image_palette=None, augmenter=None):
         assert len(images_left) == len(
             images_right), "images and labels must have same length."
         self._images_left = images_left
@@ -155,7 +182,7 @@ class DataSet(object):
 
     def perm(self, start, end):
         end = min(end, len(self._images_left))
-        return DataSet(self._images_left[start: end], self._images_right[start: end], self._image_palette, self._augmenter)
+        return DataSet(self._images_left[start: end], self._images_right[start: end], self._augmenter)
 
     def __call__(self, batch_size=20, shuffle=True, augment=True):
         """

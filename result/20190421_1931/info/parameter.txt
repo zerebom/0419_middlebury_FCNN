@@ -1,0 +1,5 @@
+Number of epochs:8
+Batch size:4
+Training rate:0.85
+Augmentation:False
+L2 regularization:0.0001
